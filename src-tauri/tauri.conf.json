@@ -5,7 +5,7 @@
     "identifier":  "pl.mikrusmusic.mikoschat.desktop",
     "build":  {
                   "beforeDevCommand":  "npm run dev",
-                  "devUrl":  "http://localhost:1420",
+                  "devUrl":  "http://127.0.0.1:1420",
                   "beforeBuildCommand":  "npm run build",
                   "frontendDist":  "../dist"
               },
@@ -21,7 +21,8 @@
                                 }
                             ],
                 "security":  {
-                                 "csp":  null
+                                 "csp":  "default-src \u0027self\u0027; script-src \u0027self\u0027; style-src \u0027self\u0027 \u0027unsafe-inline\u0027; img-src \u0027self\u0027 data: blob: https://api.chat.mikrusmusic.pl https://chat.mikrusmusic.pl; media-src \u0027self\u0027 blob: https://api.chat.mikrusmusic.pl; font-src \u0027self\u0027 data:; connect-src \u0027self\u0027 ipc: http://ipc.localhost https://api.chat.mikrusmusic.pl wss://api.chat.mikrusmusic.pl; object-src \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027none\u0027; frame-src \u0027none\u0027",
+                                 "devCsp":  "default-src \u0027self\u0027; script-src \u0027self\u0027; style-src \u0027self\u0027 \u0027unsafe-inline\u0027; img-src \u0027self\u0027 data: blob: https://api.chat.mikrusmusic.pl https://chat.mikrusmusic.pl; media-src \u0027self\u0027 blob: https://api.chat.mikrusmusic.pl; font-src \u0027self\u0027 data:; connect-src \u0027self\u0027 ws://127.0.0.1:1420 ipc: http://ipc.localhost https://api.chat.mikrusmusic.pl wss://api.chat.mikrusmusic.pl; object-src \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027none\u0027; frame-src \u0027none\u0027"
                              }
             },
     "bundle":  {
