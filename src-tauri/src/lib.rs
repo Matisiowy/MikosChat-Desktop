@@ -1,5 +1,6 @@
 mod auth;
 mod credentials;
+mod tray;
 
 use tauri::Manager;
 
@@ -16,6 +17,18 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .manage(auth::AuthState::new().expect("Could not initialize authentication"))
+        .setup(|app| {
+            tray::setup(app.handle())?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             auth::auth_login,
             auth::auth_register,
