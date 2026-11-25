@@ -1,51 +1,128 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect, useState } from 'react'
+
+import {
+  HashRouter,
+  Routes,
+  Route,
+  Navigate,
+} from 'react-router-dom'
+
+import { LoaderCircle } from 'lucide-react'
+import { useAuthStore } from './stores/auth.store'
+import { restoreSession } from './api/auth'
+
+import AuthPage from './pages/AuthPage'
+import HomePage from './pages/HomePage'
+import StatusPage from './pages/StatusPage'
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const user = useAuthStore(state => state.user)
+  const accessToken = useAuthStore(state => state.accessToken)
+  const initialized = useAuthStore(state => state.initialized)
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  const [failed, setFailed] = useState(false)
+
+  async function initialize() {
+    setFailed(false)
+
+    try {
+      await restoreSession()
+    } catch {
+      if (!useAuthStore.getState().initialized) {
+        setFailed(true)
+      }
+    }
   }
 
-  return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+  useEffect(() => {
+    void initialize()
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+    function onStorage(event: StorageEvent) {
+      if (event.key === 'mikoschat-session-event') {
+        window.location.reload()
+      }
+    }
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    window.addEventListener('storage', onStorage)
+
+    return () => {
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
+
+  if (!initialized) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center gap-5">
+        <img
+          src="/mikoschat.svg"
+          alt="MikosChat"
+          className="w-20 h-20"
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
-  );
+
+        {failed ? (
+          <>
+            <p className="text-muted text-sm">
+              Nie można przywrócić sesji.
+            </p>
+
+            <button
+              onClick={() => void initialize()}
+              className="bg-primary rounded-xl px-5 py-3"
+            >
+              Spróbuj ponownie
+            </button>
+          </>
+        ) : (
+          <>
+            <LoaderCircle
+              size={26}
+              className="animate-spin text-primary"
+            />
+
+            <p className="text-muted text-sm">
+              Przywracanie sesji...
+            </p>
+          </>
+        )}
+      </main>
+    )
+  }
+
+  const authenticated = Boolean(user && accessToken)
+
+  return (
+    <HashRouter>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            authenticated
+              ? <Navigate to="/" replace />
+              : <AuthPage />
+          }
+        />
+
+        <Route
+          path="/"
+          element={
+            authenticated
+              ? <HomePage key={user?.id} />
+              : <Navigate to="/login" replace />
+          }
+        />
+
+        <Route
+          path="/status"
+          element={<StatusPage />}
+        />
+
+        <Route
+          path="*"
+          element={<Navigate to="/" replace />}
+        />
+      </Routes>
+    </HashRouter>
+  )
 }
 
-export default App;
+export default App
