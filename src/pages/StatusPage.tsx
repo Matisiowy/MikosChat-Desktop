@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../config/server'
 import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
@@ -22,7 +23,7 @@ function App() {
   useEffect(() => {
     const controller = new AbortController()
 
-    fetch('/api/v1/health', {
+    fetch(API_BASE_URL + '/health', {
       signal: controller.signal,
     })
       .then(response => {
