@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth.store'
 import { withSessionLock } from './session-lock'
-
-import type { AuthResponse } from '../types/auth'
+import { nativeAuth, isNativeAuthError } from './native-auth'
+import { API_BASE_URL } from '../config/server'
 
 import type {
   AxiosError,
@@ -15,29 +15,38 @@ interface RetryConfig extends InternalAxiosRequestConfig {
 }
 
 export const publicApi = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 15000,
-  withCredentials: true,
+  withCredentials: false,
 })
 
 export const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 15000,
-  withCredentials: true,
+  withCredentials: false,
 })
 
 let refreshPromise: Promise<string> | null = null
 
 api.interceptors.request.use(config => {
   const state = useAuthStore.getState()
+  const request = config as RetryConfig
+
+  if (
+    request._sessionId !== undefined &&
+    request._sessionId !== state.sessionId
+  ) {
+    throw new Error('Session changed')
+  }
+
+  request._sessionId = state.sessionId
 
   if (state.accessToken) {
     config.headers.Authorization =
       `Bearer ${state.accessToken}`
+  } else {
+    config.headers.delete('Authorization')
   }
-
-  const request = config as RetryConfig
-  request._sessionId = state.sessionId
 
   return config
 })
@@ -47,24 +56,37 @@ export function refreshSession(): Promise<string> {
     return refreshPromise
   }
 
+  const expectedSessionId =
+    useAuthStore.getState().sessionId
+
   refreshPromise = withSessionLock(async () => {
     const previous = useAuthStore.getState()
 
+    if (previous.sessionId !== expectedSessionId) {
+      throw new Error('Session changed')
+    }
+
     try {
-      const { data } =
-        await publicApi.post<AuthResponse>(
-          '/auth/web/refresh',
-        )
+      const data = await nativeAuth.refresh()
+
+      if (
+        expectedSessionId &&
+        data.sessionId !== expectedSessionId
+      ) {
+        await nativeAuth.logout()
+        useAuthStore.getState().clearSession()
+        throw new Error('Session changed')
+      }
 
       useAuthStore.getState().setSession(data)
 
       return data.accessToken
     } catch (error) {
       if (
-        axios.isAxiosError(error) &&
-        error.response?.status === 401 &&
+        isNativeAuthError(error) &&
+        error.status === 401 &&
         useAuthStore.getState().sessionId ===
-          previous.sessionId
+          expectedSessionId
       ) {
         useAuthStore.getState().clearSession()
       }
@@ -79,7 +101,18 @@ export function refreshSession(): Promise<string> {
 }
 
 api.interceptors.response.use(
-  response => response,
+  response => {
+    const config = response.config as RetryConfig
+
+    if (
+      config._sessionId !==
+        useAuthStore.getState().sessionId
+    ) {
+      throw new Error('Session changed')
+    }
+
+    return response
+  },
 
   async (error: AxiosError) => {
     const config = error.config as RetryConfig | undefined
@@ -92,8 +125,6 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    config._retry = true
-
     const current = useAuthStore.getState()
 
     if (
@@ -103,39 +134,54 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
+    config._retry = true
+
     const originalSessionId = current.sessionId
 
-    try {
-      if (
-        !current.accessToken ||
-        config.headers.Authorization ===
-          `Bearer ${current.accessToken}`
-      ) {
-        await refreshSession()
-      }
-
-      if (
-        useAuthStore.getState().sessionId !==
-          originalSessionId
-      ) {
-        throw new Error('Session changed')
-      }
-
-      return api(config)
-    } catch (refreshError) {
-      return Promise.reject(refreshError)
+    if (
+      !current.accessToken ||
+      config.headers.Authorization ===
+        `Bearer ${current.accessToken}`
+    ) {
+      await refreshSession()
     }
+
+    if (
+      useAuthStore.getState().sessionId !==
+        originalSessionId
+    ) {
+      throw new Error('Session changed')
+    }
+
+    return api(config)
   },
 )
 
 export function getApiError(error: unknown): string {
+  if (isNativeAuthError(error)) {
+    switch (error.status) {
+      case 401:
+        return 'Nieprawidowe dane logowania lub wygasa sesja.'
+      case 429:
+        return 'Zbyt wiele prób. Spróbuj ponownie za chwil.'
+      case 409:
+        return 'Konto o podanych danych ju istnieje.'
+      case 400:
+        return 'Sprawd poprawno wprowadzonych danych.'
+      case 0:
+        return `Bd aplikacji: ${error.message}`
+      default:
+        return 'Serwer nie móg wykona operacji.'
+    }
+  }
+
   if (axios.isAxiosError(error)) {
     if (error.response?.status === 429) {
-      return 'Zbyt wiele prób. Spróbuj ponownie za chwilę.'
+      return 'Zbyt wiele prób. Spróbuj ponownie za chwil.'
     }
 
     if (error.response?.status === 401) {
-      return 'Nieprawidłowe dane logowania lub wygasła sesja.'
+      return 'Nieprawidowe dane logowania lub wygasa sesja.'
     }
 
     const message = error.response?.data?.message
@@ -149,9 +195,9 @@ export function getApiError(error: unknown): string {
     }
 
     if (!error.response) {
-      return 'Nie można połączyć się z serwerem.'
+      return 'Nie mona poczy si z serwerem.'
     }
   }
 
-  return 'Wystąpił nieoczekiwany błąd.'
+  return 'Wystpi nieoczekiwany bd.'
 }
