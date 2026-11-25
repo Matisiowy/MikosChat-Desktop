@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
 })
 
 useAuthStore.subscribe((state, previous) => {
-  if (state.user?.id !== previous.user?.id) {
+  if (state.sessionId !== previous.sessionId) {
     void queryClient.cancelQueries()
     queryClient.clear()
   }
