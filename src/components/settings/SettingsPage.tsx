@@ -1,3 +1,6 @@
+import ApplicationSettings from './ApplicationSettings'
+import { Monitor } from 'lucide-react'
+
 import AvatarEditor from './AvatarEditor'
 import { useState } from 'react'
 import {
@@ -21,7 +24,7 @@ import { useAuthStore } from '../../stores/auth.store'
 import { settingsApi } from '../../api/settings'
 import { getApiError } from '../../api/client'
 
-type SettingsTab = 'profile' | 'privacy'
+type SettingsTab = 'profile' | 'privacy' | 'application'
 
 interface Props {
   onBack: () => void
@@ -106,6 +109,7 @@ export default function SettingsPage({ onBack }: Props) {
   const items = [
     { id: 'profile', label: 'Mój profil', icon: UserRound },
     { id: 'privacy', label: 'Prywatność', icon: Shield },
+    { id: 'application', label: 'Aplikacja', icon: Monitor },
   ] as const
 
   return (
@@ -154,6 +158,8 @@ export default function SettingsPage({ onBack }: Props) {
       <section className="flex-1 min-w-0 overflow-y-auto p-5 md:p-10">
 
         <div className="max-w-[720px] mx-auto">
+
+          {tab === 'application' && <ApplicationSettings />}
 
           {tab === 'profile' && (
             <>
