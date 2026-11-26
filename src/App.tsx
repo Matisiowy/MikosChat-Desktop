@@ -1,3 +1,4 @@
+import { useAutoUpdate } from './hooks/useAutoUpdate'
 import { useEffect, useState } from 'react'
 
 import {
@@ -16,6 +17,7 @@ import HomePage from './pages/HomePage'
 import StatusPage from './pages/StatusPage'
 
 function App() {
+  useAutoUpdate()
   const user = useAuthStore(state => state.user)
   const accessToken = useAuthStore(state => state.accessToken)
   const initialized = useAuthStore(state => state.initialized)
