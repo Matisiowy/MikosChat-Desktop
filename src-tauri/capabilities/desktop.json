@@ -1,12 +1,19 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "desktop-capability",
-  "description": "Native Windows startup management",
-  "windows": ["main"],
-  "platforms": ["windows"],
-  "permissions": [
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled"
-  ]
+    "$schema":  "../gen/schemas/desktop-schema.json",
+    "identifier":  "desktop-capability",
+    "description":  "Native Windows application integration",
+    "windows":  [
+                    "main"
+                ],
+    "platforms":  [
+                      "windows"
+                  ],
+    "permissions":  [
+                        "autostart:allow-enable",
+                        "autostart:allow-disable",
+                        "autostart:allow-is-enabled",
+                        "updater:allow-check",
+                        "updater:allow-download-and-install",
+                        "process:allow-restart"
+                    ]
 }

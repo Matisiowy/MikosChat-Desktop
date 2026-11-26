@@ -61,6 +61,19 @@
                                    "wix":  {
                                                "language":  "en-US"
                                            }
-                               }
-               }
+                               },
+                   "createUpdaterArtifacts":  true
+               },
+    "plugins":  {
+                    "updater":  {
+                                    "requireSignedVersion":  true,
+                                    "pubkey":  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4OEY5QzE5Qjg5NDAyMzcKUldRM0FwUzRHWnlQQ0JZelJOVXBpQnQ0MjVjWXhtTzJJaW5UYmFSTTY1djdGSGNtL1hNZitQKysK",
+                                    "endpoints":  [
+                                                      "https://github.com/Matisiowy/MikosChat-Desktop/releases/download/alpha-updates/latest.json"
+                                                  ],
+                                    "windows":  {
+                                                    "installMode":  "passive"
+                                                }
+                                }
+                }
 }
