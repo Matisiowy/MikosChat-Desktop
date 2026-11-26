@@ -1,3 +1,4 @@
+import UpdateSettings from './UpdateSettings'
 import { useEffect, useState } from 'react'
 import { Power, Monitor, LoaderCircle } from 'lucide-react'
 
@@ -142,6 +143,8 @@ export default function ApplicationSettings() {
             </p>
           </div>
         </div>
+
+        <UpdateSettings />
 
         {error && (
           <p role="alert" className="text-danger text-sm">
