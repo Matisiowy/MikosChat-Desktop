@@ -1,0 +1,184 @@
+name: Publish Alpha Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.1.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-alpha-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Alpha manifest
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 10
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Generate and publish update manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $Version = $env:RELEASE_VERSION
+          $Repo = $env:GITHUB_REPOSITORY
+
+          if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid release version"
+          }
+
+          $Tag = "v$Version"
+
+          $Raw = gh release view $Tag --repo $Repo `
+            --json isDraft,isPrerelease,assets,publishedAt,body
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release not found"
+          }
+
+          $Release = $Raw | ConvertFrom-Json
+
+          if ($Release.isDraft) {
+            throw "Release must be published first"
+          }
+
+          if (-not $Release.isPrerelease) {
+            throw "Expected an Alpha prerelease"
+          }
+
+          $Endpoint = "https://github.com/$Repo/releases/download/alpha-updates/latest.json"
+          $Current = Invoke-RestMethod -Uri "$($Endpoint)?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+
+          if ([version]$Version -le [version]$Current.version) {
+            throw "New version must be newer than current Alpha version"
+          }
+
+          $Nsis = "MikosChat_${Version}_x64-setup.exe"
+          $Msi = "MikosChat_${Version}_x64_en-US.msi"
+
+          $Required = @(
+            $Nsis
+            "$Nsis.sig"
+            $Msi
+            "$Msi.sig"
+            "SHA256SUMS.txt"
+          )
+
+          foreach ($Name in $Required) {
+            $Asset = $Release.assets | Where-Object {
+              $_.name -ceq $Name -and $_.state -eq 'uploaded' -and $_.size -gt 0
+            }
+
+            if (-not $Asset) {
+              throw "Missing release asset: $Name"
+            }
+          }
+
+          New-Item -ItemType Directory -Path update-assets -Force | Out-Null
+
+          gh release download $Tag --repo $Repo --dir update-assets
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Asset download failed"
+          }
+
+          foreach ($Line in Get-Content update-assets/SHA256SUMS.txt) {
+            if ($Line -notmatch '^([a-fA-F0-9]{64})\s+([^/\\]+)$') {
+              throw "Invalid checksum entry"
+            }
+
+            $Expected = $Matches[1]
+            $Name = $Matches[2]
+
+            $Actual = (Get-FileHash `
+              (Join-Path update-assets $Name) `
+              -Algorithm SHA256).Hash
+
+            if ($Actual -ne $Expected) {
+              throw "Checksum mismatch: $Name"
+            }
+          }
+
+          $Platforms = [ordered]@{}
+
+          foreach ($Kind in @('nsis', 'msi')) {
+            $Name = if ($Kind -eq 'nsis') { $Nsis } else { $Msi }
+
+            $Signature = (Get-Content "update-assets/$Name.sig" -Raw).Trim()
+
+            $Decoded = [System.Text.Encoding]::UTF8.GetString(
+              [System.Convert]::FromBase64String($Signature)
+            )
+
+            $Comment = $Decoded -split "`r?`n" |
+              Where-Object { $_.StartsWith('trusted comment:') } |
+              Select-Object -First 1
+
+            $ExpectedVersion = [regex]::Escape($Version)
+
+            if ($Comment -notmatch "(?:^|\t)version:v?$ExpectedVersion(?:\t|$)") {
+              throw "Invalid signed version: $Name"
+            }
+
+            $Platforms["windows-x86_64-$Kind"] = @{
+              url = "https://github.com/$Repo/releases/download/$Tag/$Name"
+              signature = $Signature
+            }
+          }
+
+          $Manifest = [ordered]@{
+            version = $Version
+            notes = "MikosChat Desktop $Version Alpha"
+            pub_date = ([DateTimeOffset]$Release.publishedAt).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = $Platforms
+          }
+
+          $Json = $Manifest | ConvertTo-Json -Depth 10
+
+          [System.IO.File]::WriteAllText(
+            "$PWD/latest.json",
+            $Json,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+
+          gh release upload alpha-updates latest.json --repo $Repo --clobber
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Manifest publication failed"
+          }
+
+          $Verified = $false
+
+          for ($Attempt = 1; $Attempt -le 12; $Attempt++) {
+            try {
+              $Remote = Invoke-RestMethod -Uri "$($Endpoint)?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+
+              if ($Remote.version -eq $Version) {
+                $Verified = $true
+                break
+              }
+            } catch {
+              Write-Host "Waiting for GitHub asset propagation"
+            }
+
+            Start-Sleep -Seconds 5
+          }
+
+          if (-not $Verified) {
+            throw "Public manifest verification failed"
+          }
+
+          "## Alpha channel updated to $Version" |
+            Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
