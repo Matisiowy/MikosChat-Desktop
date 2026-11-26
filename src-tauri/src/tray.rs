@@ -25,7 +25,7 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     let separator = PredefinedMenuItem::separator(app)?;
 
-    let quit = MenuItem::with_id(app, "quit", "Zakocz MikosChat", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Zakończ MikosChat", true, None::<&str>)?;
 
     let menu = Menu::with_items(app, &[&open, &hide, &separator, &quit])?;
 
