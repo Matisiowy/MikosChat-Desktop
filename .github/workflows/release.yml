@@ -1,0 +1,202 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build signed Windows release
+    runs-on: windows-2025
+    timeout-minutes: 60
+    environment: release
+
+    permissions:
+      contents: write
+
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      CARGO_INCREMENTAL: '0'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release commit must belong to main"
+          }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+
+      - name: Setup Rust
+        shell: pwsh
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate release version
+        run: node scripts/check-version.mjs
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Check Rust compilation
+        working-directory: src-tauri
+        run: cargo check --locked
+
+      - name: Run Clippy
+        working-directory: src-tauri
+        run: cargo clippy --locked -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Build and sign installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: pwsh
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "Missing updater signing key"
+          }
+
+          npm run tauri build -- --bundles nsis,msi
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tauri release build failed"
+          }
+
+      - name: Collect and validate release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $Version = $env:RELEASE_TAG.TrimStart('v')
+          $Bundle = 'src-tauri/target/release/bundle'
+
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+
+          $Installers = @(
+            Get-ChildItem "$Bundle/nsis" -Filter '*.exe' -File
+            Get-ChildItem "$Bundle/msi" -Filter '*.msi' -File
+          )
+
+          if ($Installers.Count -ne 2) {
+            throw "Expected exactly two installers"
+          }
+
+          foreach ($Installer in $Installers) {
+            $SignaturePath = "$($Installer.FullName).sig"
+
+            if (-not (Test-Path $SignaturePath)) {
+              throw "Missing signature for $($Installer.Name)"
+            }
+
+            $Signature = (Get-Content $SignaturePath -Raw).Trim()
+
+            $Decoded = [System.Text.Encoding]::UTF8.GetString(
+              [System.Convert]::FromBase64String($Signature)
+            )
+
+            $TrustedComment = $Decoded -split "`r?`n" |
+              Where-Object { $_.StartsWith('trusted comment:') } |
+              Select-Object -First 1
+
+            if (-not $TrustedComment) {
+              throw "Missing trusted signature comment"
+            }
+
+            $ExpectedVersion = [regex]::Escape($Version)
+
+            if ($TrustedComment -notmatch "(?:^|\t)version:v?$ExpectedVersion(?:\t|$)") {
+              throw "Signature does not bind the release version"
+            }
+
+            Copy-Item $Installer.FullName release-assets/
+            Copy-Item $SignaturePath release-assets/
+
+            Write-Host "Collected $($Installer.Name)"
+            Write-Host "Signed version metadata verified: $Version"
+          }
+
+          Get-ChildItem release-assets -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $Hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              "$Hash  $($_.Name)"
+            } | Set-Content release-assets/SHA256SUMS.txt -Encoding ascii
+
+          Get-ChildItem release-assets |
+            Select-Object Name, Length |
+            Format-Table
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $Tag = $env:RELEASE_TAG
+
+          $Assets = @(
+            Get-ChildItem release-assets -File |
+              ForEach-Object { $_.FullName }
+          )
+
+          gh release create $Tag @Assets `
+            --repo $env:GITHUB_REPOSITORY `
+            --verify-tag `
+            --draft `
+            --prerelease `
+            --title "MikosChat Desktop $Tag Alpha" `
+            --generate-notes
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create draft release"
+          }
+
+      - name: Release summary
+        shell: pwsh
+        run: |
+          @"
+          ## MikosChat Desktop $env:RELEASE_TAG
+
+          - Windows x64 build completed
+          - NSIS installer generated
+          - MSI installer generated
+          - Updater signatures generated
+          - Signed version metadata checked
+          - SHA256 checksums generated
+          - Draft prerelease created
+
+          Manual testing is required before publication.
+          "@ | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
