@@ -1,3 +1,8 @@
+import { useRef } from 'react'
+import { api } from '../api/client'
+import { initializeNotifications, notifyMessage } from '../services/notifications'
+import type { Message } from '../types/chat'
+
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { socket } from '../api/socket'
@@ -7,7 +12,13 @@ import { useRealtimeStore } from '../stores/realtime.store'
 
 import type { TypingStatus } from '../stores/realtime.store'
 
-export function useRealtime() {
+export function useRealtime(selectedId: string | null) {
+  const selectedRef = useRef(selectedId)
+  selectedRef.current = selectedId
+
+  useEffect(() => {
+    void initializeNotifications()
+  }, [])
   const token = useAuthStore(state => state.accessToken)
   const queryClient = useQueryClient()
 
@@ -26,6 +37,65 @@ export function useRealtime() {
       void queryClient.invalidateQueries({
         queryKey: ['conversations'],
       })
+    }
+
+    async function onNewMessage(message: Message) {
+      refreshMessages()
+
+      const auth = useAuthStore.getState()
+      const userId = auth.user?.id
+      const sessionId = auth.sessionId
+
+      if (
+        !active ||
+        !userId ||
+        !sessionId ||
+        !message?.id ||
+        !message.conversationId ||
+        message.senderId === userId ||
+        message.type === 'SYSTEM' ||
+        message.deletedAt
+      ) {
+        return
+      }
+
+      function isAllowed() {
+        return (
+          active &&
+          useAuthStore.getState().sessionId === sessionId &&
+          !(
+            selectedRef.current === message.conversationId &&
+            document.hasFocus() &&
+            document.visibilityState === 'visible'
+          )
+        )
+      }
+
+      if (!isAllowed()) return
+
+      try {
+        const { data } = await api.get<{
+          mutedUntil: string | null
+          archived: boolean
+        }>(
+          `/conversations/${encodeURIComponent(message.conversationId)}/settings`,
+        )
+
+        if (data.archived) return
+
+        if (
+          data.mutedUntil &&
+          new Date(data.mutedUntil).getTime() > Date.now()
+        ) {
+          return
+        }
+
+        if (!isAllowed()) return
+
+        await notifyMessage(message, userId, isAllowed)
+      } catch (error) {
+        console.warn('[Notifications] Settings check failed', error)
+      }
     }
 
     function onGroupChanged(payload: {
@@ -139,7 +209,7 @@ export function useRealtime() {
     socket.on('disconnect', onDisconnect)
     socket.on('connect_error', onError)
 
-    socket.on('message:new', refreshMessages)
+    socket.on('message:new', onNewMessage)
     socket.on('message:updated', refreshMessages)
     socket.on('message:deleted', refreshMessages)
     socket.on('receipt:update', refreshMessages)
@@ -168,7 +238,7 @@ export function useRealtime() {
       socket.off('disconnect', onDisconnect)
       socket.off('connect_error', onError)
 
-      socket.off('message:new', refreshMessages)
+      socket.off('message:new', onNewMessage)
       socket.off('message:updated', refreshMessages)
       socket.off('message:deleted', refreshMessages)
       socket.off('receipt:update', refreshMessages)

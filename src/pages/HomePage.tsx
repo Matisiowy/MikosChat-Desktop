@@ -36,7 +36,7 @@ import {
 } from '../utils/conversation'
 
 export default function HomePage() {
-  useRealtime()
+
 
   const user = useAuthStore(state => state.user!)
   const connected = useRealtimeStore(state => state.connected)
@@ -46,6 +46,8 @@ export default function HomePage() {
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [groupDetailsOpen, setGroupDetailsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+
+  useRealtime(tab === 'settings' ? null : selectedId)
 
 
   const conversation = useQuery({
